@@ -1,0 +1,267 @@
+name: Release
+on:
+  push:
+    tags: [ v* ]
+
+permissions: {}
+
+env:
+  GO_VERSION: 1.26.0
+  REPO: ${{ github.repository }}
+  APP_PACKAGE: github.com/clouddrove/smurf/cmd
+  BINARY_NAME: smurf
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: {}
+    strategy:
+      matrix:
+        GOOS: [linux, darwin, windows]
+        GOARCH: [amd64, arm64]
+        include:
+          - GOOS: windows
+            ext: .exe
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Get Version from Tag
+      id: version
+      run: |
+        safe_version=$(printf '%s' "${GITHUB_REF#refs/tags/}" | tr -d '\n\r')
+        echo "version=${safe_version}" >> "$GITHUB_OUTPUT"
+        echo "Building version: ${safe_version}"
+
+    - name: Get Build Info
+      id: buildinfo
+      env:
+        INPUT_VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        set -euo pipefail
+        echo "Collecting build information..."
+        
+        VERSION="$INPUT_VERSION"
+        COMMIT=$(git rev-parse --short HEAD)
+        DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        
+        echo "Version: $VERSION"
+        echo "Commit: $COMMIT"
+        echo "Build Date: $DATE"
+        
+        safe_version=$(printf '%s' "$VERSION" | tr -d '\n\r')
+        safe_commit=$(printf '%s' "$COMMIT" | tr -d '\n\r')
+        safe_date=$(printf '%s' "$DATE" | tr -d '\n\r')
+        
+        echo "version=${safe_version}" >> "$GITHUB_OUTPUT"
+        echo "commit=${safe_commit}" >> "$GITHUB_OUTPUT"
+        echo "date=${safe_date}" >> "$GITHUB_OUTPUT"
+
+    - name: Build Binary with Version Injection
+      env:
+        BINARY_NAME: ${{ env.BINARY_NAME }}
+        MATRIX_GOOS: ${{ matrix.GOOS }}
+        MATRIX_GOARCH: ${{ matrix.GOARCH }}
+        APP_PKG: ${{ env.APP_PACKAGE }}
+        BUILD_VERSION: ${{ steps.buildinfo.outputs.version }}
+        BUILD_COMMIT: ${{ steps.buildinfo.outputs.commit }}
+        BUILD_DATE: ${{ steps.buildinfo.outputs.date }}
+      run: |
+        echo "Building $BINARY_NAME for $MATRIX_GOOS/$MATRIX_GOARCH"
+        echo "Package: $APP_PKG"
+        echo "Version: $BUILD_VERSION"
+        
+        OUTPUT_NAME="$BINARY_NAME"
+        if [ "$MATRIX_GOOS" = "windows" ]; then
+          OUTPUT_NAME="$OUTPUT_NAME.exe"
+        fi
+        
+        # Create output directory
+        mkdir -p "bin/$MATRIX_GOOS-$MATRIX_GOARCH"
+        
+        # CORRECTED BUILD COMMAND - using current directory (.)
+        GOOS="$MATRIX_GOOS" GOARCH="$MATRIX_GOARCH" go build -a \
+          -ldflags "\
+            -X '${APP_PKG}.version=${BUILD_VERSION}' \
+            -X '${APP_PKG}.commit=${BUILD_COMMIT}' \
+            -X '${APP_PKG}.date=${BUILD_DATE}'" \
+          -o "bin/$MATRIX_GOOS-$MATRIX_GOARCH/$OUTPUT_NAME" .
+
+    - name: Create Distribution Archive
+      env:
+        BINARY_NAME: ${{ env.BINARY_NAME }}
+        BUILD_VERSION: ${{ steps.buildinfo.outputs.version }}
+        MATRIX_GOOS: ${{ matrix.GOOS }}
+        MATRIX_GOARCH: ${{ matrix.GOARCH }}
+      run: |
+        mkdir -p dist
+        
+        ARCHIVE_NAME="${BINARY_NAME}-${BUILD_VERSION}-${MATRIX_GOOS}-${MATRIX_GOARCH}"
+        
+        if [ "$MATRIX_GOOS" = "windows" ]; then
+          # For Windows: create zip with .exe binary
+          zip -j "dist/$ARCHIVE_NAME.zip" "bin/$MATRIX_GOOS-$MATRIX_GOARCH/$BINARY_NAME.exe"
+          echo "Created Windows archive: dist/$ARCHIVE_NAME.zip"
+        else
+          # For Linux/macOS: create tar.gz
+          tar -czf "dist/$ARCHIVE_NAME.tar.gz" -C "bin/$MATRIX_GOOS-$MATRIX_GOARCH" "$BINARY_NAME"
+          echo "Created Unix archive: dist/$ARCHIVE_NAME.tar.gz"
+        fi
+        
+        echo "Distribution archives:"
+        ls -la dist/
+
+    - name: 'Upload Artifact'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: artifacts-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
+        path: dist
+        retention-days: 1
+        if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      with:
+        fetch-depth: 0
+
+    - name: Download All Artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      with:
+        path: artifacts
+        pattern: artifacts-*
+        merge-multiple: true
+
+    - name: Install ChangeLog generator
+      run: |
+        wget https://github.com/git-chglog/git-chglog/releases/download/v0.15.1/git-chglog_0.15.1_linux_amd64.tar.gz
+        tar xzf git-chglog*.tar.gz git-chglog
+        
+    - name: "Get Last Release"
+      id: last_release
+      uses: InsonusK/get-latest-release@7a9ff16c8c6b7ead5d71c0f1cc61f2703170eade # v1.1.0
+      with:
+        myToken: ${{ github.token }}
+        exclude_types: "draft|prerelease"
+
+    - name: Generate Changelog
+      id: generate-changelog
+      run: PATH="${PATH}:." make CHANGELOG.md
+
+    - name: Generate checksums
+      run: |
+        cd artifacts
+        echo "Files available for checksum generation:"
+        ls -la
+        
+        # Create checksums for all archive files
+        for file in *.tar.gz *.zip; do
+          if [ -f "$file" ]; then
+            sha256sum "$file" >> checksums.txt
+            echo "Added checksum for: $file"
+          fi
+        done
+        
+        echo "Generated checksums:"
+        cat checksums.txt
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+      with:
+        files: |
+          artifacts/*.tar.gz
+          artifacts/*.zip
+          artifacts/checksums.txt
+        body_path: ./CHANGELOG.md
+        generate_release_notes: true
+        draft: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Verify Release
+      env:
+        GH_REPOSITORY: ${{ github.repository }}
+        GH_REF_NAME: ${{ github.ref_name }}
+      run: |
+        echo "✅ Release created successfully!"
+        echo "📦 Binaries available in GitHub Releases:"
+        echo "   https://github.com/$GH_REPOSITORY/releases/tag/$GH_REF_NAME"
+
+  docker-build:
+    runs-on: ubuntu-latest
+    name: Build the docker image
+    needs: build
+    permissions: {}
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Download Linux Binary for Docker
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: artifacts-linux-amd64
+          path: downloaded-artifacts
+
+      - name: Extract Binary for Docker
+        run: |
+          mkdir -p docker-bin
+          cd downloaded-artifacts
+          
+          # Extract the binary from the archive
+          for file in *.tar.gz; do
+            if [ -f "$file" ]; then
+              tar -xzf "$file" -C ../docker-bin/
+              echo "Extracted binary from: $file"
+              break
+            fi
+          done
+          
+          echo "Binary ready for Docker:"
+          ls -la ../docker-bin/
+
+      - name: Build Docker Image
+        env:
+          BINARY_NAME: ${{ env.BINARY_NAME }}
+          REPO: ${{ env.REPO }}
+          GH_REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Use the extracted binary
+          cp "docker-bin/$BINARY_NAME" /usr/local/bin/ || true
+          chmod +x "/usr/local/bin/$BINARY_NAME"
+          
+          make image IMAGE="ghcr.io/${REPO}:${GH_REF_NAME}"
+
+      - name: Tag latest
+        env:
+          REPO: ${{ env.REPO }}
+          GH_REF_NAME: ${{ github.ref_name }}
+        run: docker tag "ghcr.io/${REPO}:${GH_REF_NAME}" "ghcr.io/${REPO}:latest"
+
+      - name: Push Docker Image
+        env:
+          REPO: ${{ env.REPO }}
+          GH_REF_NAME: ${{ github.ref_name }}
+        run: docker push "ghcr.io/${REPO}:${GH_REF_NAME}"
+
+      - name: Push Latest Tag
+        env:
+          REPO: ${{ env.REPO }}
+        run: docker push "ghcr.io/${REPO}:latest"

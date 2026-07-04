@@ -1,0 +1,250 @@
+package sdkr
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/clouddrove/smurf/configs"
+	"github.com/clouddrove/smurf/internal/docker"
+	"github.com/distribution/reference"
+	"github.com/pterm/pterm"
+	"github.com/spf13/cobra"
+)
+
+// provisionGHCRCmd defines the "provision-ghcr" CLI command for GHCR operations.
+var provisionGHCRCmd = &cobra.Command{
+	Use:   "provision-ghcr [IMAGE_NAME[:TAG]]",
+	Short: "Build and push a Docker image to GitHub Container Registry",
+	Long: `Build and push a Docker image to GitHub Container Registry (GHCR).
+
+Authentication:
+  - Set GITHUB_USERNAME and GITHUB_TOKEN environment variables
+  - OR define them in config file (GITHUB_USERNAME, GITHUB_TOKEN)
+  - The token must have 'write:packages' scope
+
+Image format:
+  ghcr.io/OWNER/IMAGE_NAME:TAG
+Example: ghcr.io/my-org/my-app:latest`,
+	Args:         cobra.MaximumNArgs(1),
+	SilenceUsage: true,
+	RunE:         runProvisionGHCR,
+	Example: `
+  # Push to GHCR with full image reference
+  smurf sdkr provision-ghcr ghcr.io/my-org/my-image:latest
+
+  # Push with specific tag and build options
+  smurf sdkr provision-ghcr ghcr.io/my-username/my-app:v1.0.0 \
+    --context . --file Dockerfile --no-cache \
+    --build-arg ENV=production --platform linux/amd64 \
+    --delete
+
+  # Using environment variables for auth
+  export GITHUB_USERNAME="my-username"
+  export GITHUB_TOKEN="ghp_yourPersonalAccessToken"
+  smurf sdkr provision-ghcr ghcr.io/my-org/my-app:latest
+
+  # Read image name from config file
+  smurf sdkr provision-ghcr --delete
+`,
+}
+
+func init() {
+	provisionGHCRCmd.Flags().StringVarP(&configs.DockerfilePath, "file", "f", "", "Path to Dockerfile (default: Dockerfile)")
+	provisionGHCRCmd.Flags().BoolVar(&configs.NoCache, "no-cache", false, "Disable build cache")
+	provisionGHCRCmd.Flags().StringArrayVar(&configs.BuildArgs, "build-arg", []string{}, "Build-time variables (e.g. --build-arg key=value)")
+	provisionGHCRCmd.Flags().StringVar(&configs.Target, "target", "", "Target build stage")
+	provisionGHCRCmd.Flags().StringVar(&configs.Platform, "platform", "", "Platform (e.g. linux/amd64)")
+	provisionGHCRCmd.Flags().IntVar(&configs.BuildTimeout, "timeout", 1500, "Build timeout in seconds")
+	provisionGHCRCmd.Flags().StringVar(&configs.ContextDir, "context", "", "Build context (default: current directory)")
+	provisionGHCRCmd.Flags().BoolVarP(&configs.ConfirmAfterPush, "yes", "y", false, "Push without confirmation")
+	provisionGHCRCmd.Flags().BoolVarP(&configs.DeleteAfterPush, "delete", "d", false, "Delete local image after push")
+	provisionGHCRCmd.Flags().BoolVar(&useAI, "ai", false, "To enable AI help mode, export the OPENAI_API_KEY environment variable with your OpenAI API key.")
+	sdkrCmd.AddCommand(provisionGHCRCmd)
+}
+
+func runProvisionGHCR(cmd *cobra.Command, args []string) error {
+	var imageRef string
+	if len(args) == 1 {
+		imageRef = args[0]
+	} else {
+		cfg, err := configs.LoadConfig(configs.FileName)
+		if err != nil {
+			return err
+		}
+		if cfg.Sdkr.ImageName == "" {
+			return errors.New("image name (with optional tag) must be provided either as an argument or in the config")
+		}
+		imageRef = resolveImageRef(args, cfg)
+		if err := ensureGHCRAuth(cfg.Sdkr.GithubUsername, cfg.Sdkr.GithubToken); err != nil {
+			return err
+		}
+	}
+
+	if imageRef == "" {
+		return errors.New("image reference not provided")
+	}
+
+	if err := validateGHCRImage(imageRef); err != nil {
+		return err
+	}
+
+	username := os.Getenv("GITHUB_USERNAME")
+	token := os.Getenv("GITHUB_TOKEN")
+	if username == "" || token == "" {
+		return errors.New("missing required GHCR credentials")
+	}
+
+	if err := ensureGHCRAuth(username, token); err != nil {
+		return err
+	}
+
+	imageName, tag, err := configs.ParseImage(imageRef)
+	if err != nil {
+		return fmt.Errorf("invalid image reference: %v", err)
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+
+	fullImage := fmt.Sprintf("%s:%s", imageName, tag)
+	pterm.Info.Printfln("Preparing to build and push image: %s", fullImage)
+
+	buildOpts, err := prepareBuildOptions()
+	if err != nil {
+		return err
+	}
+
+	if err := docker.Build(imageName, tag, buildOpts, useAI); err != nil {
+		return fmt.Errorf("build failed: %v", err)
+	}
+	pterm.Success.Println("✅ Build completed successfully.")
+
+	if err := pushToGHCR(fullImage); err != nil {
+		return err
+	}
+
+	if configs.DeleteAfterPush {
+		cleanupLocalImage(fullImage)
+	}
+
+	pterm.Success.Println("🚀 GHCR provisioning completed successfully.")
+	return nil
+}
+
+func resolveImageRef(args []string, cfg *configs.Config) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	if cfg.Sdkr.ImageName != "" {
+		return cfg.Sdkr.ImageName
+	}
+	pterm.Error.Println("Image name must be provided either as argument or in config file.")
+	return ""
+}
+
+func validateGHCRImage(image string) error {
+	ghcrFormat := "ghcr.io/OWNER/IMAGE_NAME:TAG"
+	if !strings.HasPrefix(image, "ghcr.io/") {
+		pterm.Error.Printfln("Invalid GHCR image format: %s\nExpected format: %s\n Missing Prefix : ghcr.io/", image, ghcrFormat)
+		return errors.New("invalid GHCR image format")
+	}
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		pterm.Error.Printfln("Invalid GHCR image reference: %s\n Expected format: %s", image, ghcrFormat)
+		return fmt.Errorf("invalid GHCR image reference: %w", err)
+	}
+	// GHCR requires owner + repository: ghcr.io/<owner>/<repo>. named.Name()
+	// keeps the registry in the string, so a 2-slash minimum covers both
+	// ghcr.io/owner/repo and deeper paths like ghcr.io/org/team/app.
+	if strings.Count(named.Name(), "/") < 2 {
+		pterm.Error.Printfln("Invalid GHCR image reference: %s (missing owner)", image)
+		pterm.Info.Printf("Expected format: %s", ghcrFormat)
+		return errors.New("invalid GHCR image reference: missing owner")
+	}
+	return nil
+}
+
+func ensureGHCRAuth(username, token string) error {
+	if username == "" || token == "" {
+		envVars := map[string]string{
+			"GITHUB_USERNAME": os.Getenv("GITHUB_USERNAME"),
+			"GITHUB_TOKEN":    os.Getenv("GITHUB_TOKEN"),
+		}
+		if err := configs.ExportEnvironmentVariables(envVars); err != nil {
+			return err
+		}
+		username = envVars["GITHUB_USERNAME"]
+		token = envVars["GITHUB_TOKEN"]
+	}
+
+	if username == "" || token == "" {
+		pterm.Error.Println("GitHub Container Registry credentials missing.")
+		pterm.Info.Println("Set using environment variables:")
+		pterm.Info.Println("  export GITHUB_USERNAME=\"your-username\"")
+		pterm.Info.Println("  export GITHUB_TOKEN=\"your-github-personal-access-token\"")
+		return errors.New("missing GHCR credentials")
+	}
+	return nil
+}
+
+func prepareBuildOptions() (docker.BuildOptions, error) {
+	if configs.ContextDir == "" {
+		wd, err := os.Getwd()
+pterm.Error.Println("Failed to determine working directory.")
+		if err != nil {
+			return docker.BuildOptions{}, fmt.Errorf("failed to get working directory: %v", err)
+		}
+		configs.ContextDir = wd
+	}
+
+	if configs.DockerfilePath == "" {
+		configs.DockerfilePath = filepath.Join(configs.ContextDir, "Dockerfile")
+	} else {
+		configs.DockerfilePath = filepath.Join(configs.ContextDir, configs.DockerfilePath)
+	}
+
+	buildArgsMap := make(map[string]string)
+	for _, arg := range configs.BuildArgs {
+		parts := strings.SplitN(arg, "=", 2)
+		if len(parts) == 2 {
+			buildArgsMap[parts[0]] = parts[1]
+		}
+	}
+
+	return docker.BuildOptions{
+		DockerfilePath: configs.DockerfilePath,
+		NoCache:        configs.NoCache,
+		BuildArgs:      buildArgsMap,
+		Target:         configs.Target,
+		Platform:       configs.Platform,
+		Timeout:        time.Duration(configs.BuildTimeout) * time.Second,
+		ContextDir:     configs.ContextDir,
+	}, nil
+}
+
+func pushToGHCR(fullImage string) error {
+	pterm.Info.Printf("📦 Pushing image %s to GitHub Container Registry...\n", fullImage)
+	pushOpts := docker.PushOptions{
+		ImageName: fullImage,
+		Timeout:   1000 * time.Second,
+	}
+	if err := docker.PushToGHCR(pushOpts, useAI); err != nil {
+		pterm.Error.Printfln("Push failed: %v", err)
+		return err
+	}
+	pterm.Success.Printfln("✅ Successfully pushed %s to GHCR", fullImage)
+	return nil
+}
+
+func cleanupLocalImage(fullImage string) {
+	pterm.Info.Printf("🧹 Deleting local image %s...\n", fullImage)
+	if err := docker.RemoveImage(fullImage, useAI); err != nil {
+		pterm.Warning.Printfln("Failed to delete local image: %v", err)
+	} else {
+		pterm.Success.Println("Local image deleted successfully.")
+	}
+}

@@ -1,0 +1,38 @@
+name: Test specific version install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install smurf v1.1.5
+        id: action
+        uses: .
+        with:
+          version: v1.1.5
+
+      - name: Assert smurf is installed and on PATH
+        run: |
+          echo "Checking smurf binary exists..."
+          if ! command -v smurf >/dev/null 2>&1; then
+            echo "FAIL: smurf not found on PATH"
+            exit 1
+          fi
+          echo "PASS: smurf is on PATH at $(command -v smurf)"
+
+      - name: Assert smurf version matches requested version
+        run: |
+          VERSION_OUTPUT=$(smurf --version 2>&1 || true)
+          echo "smurf --version output: $VERSION_OUTPUT"
+          if [ -z "$VERSION_OUTPUT" ]; then
+            echo "FAIL: smurf --version produced no output"
+            exit 1
+          fi
+          if echo "$VERSION_OUTPUT" | grep -q "1.1.5"; then
+            echo "PASS: version output contains 1.1.5"
+          else
+            echo "FAIL: expected version output to contain '1.1.5', got: $VERSION_OUTPUT"
+            exit 1
+          fi

@@ -9,6 +9,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | Version | Tag | Upstream commit |
 |---------|-----|-----------------|
 | v1.1.2 | [`v1.1.2`](https://github.com/chainguard-actions/clouddrove-smurf/tree/v1.1.2) | [`23388ea`](https://github.com/clouddrove/smurf/commit/23388ea6b42e788c59747f8750841be08524031d) |
+| v1.1.5 | [`v1.1.5`](https://github.com/chainguard-actions/clouddrove-smurf/tree/v1.1.5) | [`9bc3b11`](https://github.com/clouddrove/smurf/commit/9bc3b113863543ea7d137b137691988d84760a1f) |
 
 ## Privacy
 

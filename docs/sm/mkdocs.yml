@@ -1,0 +1,84 @@
+site_name: Smurf
+theme:
+  name: material
+  font:
+    text: Merriweather Sans
+    code: Red Hat Mono
+  logo: https://clouddrove.com/assets/images/logo.png
+  favicon: https://clouddrove.com/favicon.ico
+  features:
+    - navigation.expand
+    - navigation.sections
+    - toc.integrate
+  palette:
+    # Dark Mode
+    - scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Dark mode
+      primary: black
+      accent: deep purple
+    # Light Mode
+    - scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Light mode
+      primary: blue
+      accent: deep orange
+
+nav:
+  - Home: index.md
+  - Installation Guide: installation.md
+  - GitHub shared workflow with Smurf: shared_workflow_guide.md
+  - Working with Docker using Smurf: sdkr.md
+  - Working with Helm using Smurf: selm.md
+  - Working with Terraform using Smurf: stf.md
+  - smurf.yaml Configuration Reference: configuration.md
+  - CLI Reference: cli/smurf.md
+  - Advanced: advanced.md
+
+plugins:
+  - search
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+edit_uri: "https://github.com/clouddrove/smurf/tree/master/docs"
+
+repo_url: https://github.com/clouddrove/smurf
+repo_name: Smurf
+
+markdown_extensions:
+  - attr_list
+  - md_in_html  # Enables rendering of raw HTML inside Markdown
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/clouddrove
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/clouddrove/
+
+  generator: false 
+
+extra_css:
+  - css/custom.css
+
+copyright: Copyright &copy; 2025 CloudDrove

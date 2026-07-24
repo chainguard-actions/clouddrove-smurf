@@ -1,0 +1,86 @@
+name: 'Setup Smurf'
+description: 'Install the Smurf CLI tool in GitHub Actions workflows'
+author: 'CloudDrove'
+branding:
+  icon: 'terminal'
+  color: 'blue'
+inputs:
+  version:
+    description: 'Version of smurf to install (e.g., v0.0.3, latest)'
+    required: false
+    default: 'latest'
+runs:
+  using: 'composite'
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Determine OS and Architecture
+      shell: bash
+      id: platform
+      env:
+        RUNNER_OS_INPUT: ${{ runner.os }}
+      run: |
+        OS=$(printf '%s' "$RUNNER_OS_INPUT" | tr -d '\n\r' | tr '[:upper:]' '[:lower:]')
+        ARCH="amd64"
+
+        if [ "$OS" = "macos" ]; then
+          OS="darwin"
+        fi
+
+        if [ "$(uname -m)" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then
+          ARCH="arm64"
+        fi
+
+        safe_os=$(printf '%s' "$OS" | tr -d '\n\r')
+        safe_arch=$(printf '%s' "$ARCH" | tr -d '\n\r')
+        echo "os=$safe_os" >> "$GITHUB_OUTPUT"
+        echo "arch=$safe_arch" >> "$GITHUB_OUTPUT"
+    - name: Get correct version format
+      shell: bash
+      id: version
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if [ "$INPUT_VERSION" = "latest" ]; then
+          # Get latest tag
+          LATEST_TAG=$(curl -s https://api.github.com/repos/clouddrove/smurf/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          safe_tag=$(printf '%s' "$LATEST_TAG" | tr -d '\n\r')
+          echo "tag=${safe_tag}" >> "$GITHUB_OUTPUT"
+        else
+          # Validate version format (must start with v and contain only safe chars)
+          if [[ ! "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format. Expected format: vX.Y.Z"
+            exit 1
+          fi
+
+          safe_version=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
+          echo "tag=$safe_version" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Download and Install Smurf
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.tag }}
+        OS: ${{ steps.platform.outputs.os }}
+        ARCH: ${{ steps.platform.outputs.arch }}
+      run: "set -euo pipefail\necho \"\U0001F4E6 Installing smurf $VERSION for $OS/$ARCH...\"\n\n# CORRECT URL: Includes 'v' in both path and filename\nURL=\"https://github.com/clouddrove/smurf/releases/download/${VERSION}/smurf-${VERSION}-${OS}-${ARCH}.tar.gz\"\n\necho \"Downloading from: $URL\"\n\n# Download and extract\nif ! curl -fsSLo smurf.tar.gz \"$URL\"; then\n  echo \"❌ Failed to download smurf from $URL\"\n  exit 1\nfi\ntar -xzf smurf.tar.gz\nchmod +x smurf\nsudo mv smurf /usr/local/bin/\nrm smurf.tar.gz\n\necho \"✅ smurf installed successfully!\"\n"
+    - name: Verify Installation
+      shell: bash
+      run: |
+        smurf --version

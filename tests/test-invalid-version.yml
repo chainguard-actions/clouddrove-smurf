@@ -1,0 +1,27 @@
+name: Test invalid version format is rejected
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Attempt to install smurf with invalid version (missing v prefix)
+        id: action
+        uses: .
+        with:
+          version: "1.2.3"
+        continue-on-error: true
+
+      - name: Assert action failed for invalid version
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "action outcome: $OUTCOME"
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action correctly rejected invalid version format '1.2.3' (missing 'v' prefix)"
+          else
+            echo "FAIL: action should have failed for version '1.2.3' but outcome was '$OUTCOME'"
+            exit 1
+          fi

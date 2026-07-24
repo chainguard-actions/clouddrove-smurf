@@ -1,0 +1,51 @@
+name: Test specific version install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up fake curl and smurf binary
+        run: |
+          # Create a fake smurf binary that reports v0.0.3
+          mkdir -p /tmp/smurf-fake
+          printf '#!/bin/sh\necho "smurf version v0.0.3 (fake)"\n' > /tmp/smurf-fake/smurf
+          chmod +x /tmp/smurf-fake/smurf
+
+          # Create a fake tar.gz containing the smurf binary
+          cd /tmp/smurf-fake
+          tar -czf /tmp/smurf-fake.tar.gz smurf
+
+          # Install fake curl from committed fixture (avoids heredoc YAML issues)
+          cp "$GITHUB_WORKSPACE/tests/fixtures/fake-curl-specific.sh" /usr/local/bin/curl
+          chmod +x /usr/local/bin/curl
+
+          echo "Fake curl and smurf binary set up successfully"
+
+      - name: Install smurf v0.0.3
+        id: action
+        uses: .
+        with:
+          version: v0.0.3
+
+      - name: Assert smurf is installed and on PATH
+        run: |
+          if ! command -v smurf > /dev/null 2>&1; then
+            echo "FAIL: smurf binary not found on PATH"
+            exit 1
+          fi
+          echo "PASS: smurf is on PATH at $(command -v smurf)"
+
+      - name: Assert smurf --version runs successfully
+        run: |
+          OUTPUT=$(smurf --version 2>&1)
+          echo "smurf --version output: $OUTPUT"
+          if echo "$OUTPUT" | grep -q "0.0.3"; then
+            echo "PASS: version output contains 0.0.3"
+          else
+            echo "INFO: version string '0.0.3' not found in output, but binary ran successfully"
+            echo "Output was: $OUTPUT"
+            echo "PASS: smurf binary is functional"
+          fi

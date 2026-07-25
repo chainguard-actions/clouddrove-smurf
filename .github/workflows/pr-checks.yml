@@ -8,8 +8,6 @@ on:
       - synchronize
       - reopened
 
-permissions: {}
-
 jobs:
   pr-validation:
     if: github.actor != 'dependabot[bot]'

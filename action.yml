@@ -45,9 +45,8 @@ runs:
         fi
 
         safe_os=$(printf '%s' "$OS" | tr -d '\n\r')
-        safe_arch=$(printf '%s' "$ARCH" | tr -d '\n\r')
         echo "os=$safe_os" >> "$GITHUB_OUTPUT"
-        echo "arch=$safe_arch" >> "$GITHUB_OUTPUT"
+        echo "arch=$ARCH" >> "$GITHUB_OUTPUT"
     - name: Get correct version format
       shell: bash
       id: version
@@ -59,8 +58,7 @@ runs:
         if [ "$INPUT_VERSION" = "latest" ]; then
           # Get latest tag
           LATEST_TAG=$(curl -s https://api.github.com/repos/clouddrove/smurf/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-          safe_tag=$(printf '%s' "$LATEST_TAG" | tr -d '\n\r')
-          echo "tag=${safe_tag}" >> "$GITHUB_OUTPUT"
+          echo "tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
         else
           # Validate version format (must start with v and contain only safe chars)
           if [[ ! "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -68,8 +66,8 @@ runs:
             exit 1
           fi
 
-          safe_tag=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
-          echo "tag=${safe_tag}" >> "$GITHUB_OUTPUT"
+          safe_version=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
+          echo "tag=$safe_version" >> "$GITHUB_OUTPUT"
         fi
     - name: Download and Install Smurf
       shell: bash

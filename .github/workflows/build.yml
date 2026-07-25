@@ -1,8 +1,5 @@
 name: Build
 
-permissions:
-  contents: read
-
 env:
   GO_VERSION: 1.26.0
   APP_PACKAGE: github.com/clouddrove/smurf/cmd 
@@ -18,12 +15,12 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@v6
         with:
           go-version: ${{env.GO_VERSION}}
 
@@ -56,23 +53,18 @@ jobs:
           echo "date=${DATE}" >> $GITHUB_OUTPUT
 
       - name: Build
-        env:
-          APP_PKG: ${{ env.APP_PACKAGE }}
-          BUILD_VERSION: ${{ steps.buildinfo.outputs.version }}
-          BUILD_COMMIT: ${{ steps.buildinfo.outputs.commit }}
-          BUILD_DATE: ${{ steps.buildinfo.outputs.date }}
         run: |
           echo "Building with version injection:"
-          echo "Package: $APP_PKG"
-          echo "Version: $BUILD_VERSION"
-          echo "Commit: $BUILD_COMMIT"
-          echo "Date: $BUILD_DATE"
+          echo "Package: ${{env.APP_PACKAGE}}"
+          echo "Version: ${{steps.buildinfo.outputs.version}}"
+          echo "Commit: ${{steps.buildinfo.outputs.commit}}"
+          echo "Date: ${{steps.buildinfo.outputs.date}}"
           
           go build -a \
             -ldflags "\
-              -X '${APP_PKG}.version=${BUILD_VERSION}' \
-              -X '${APP_PKG}.commit=${BUILD_COMMIT}' \
-              -X '${APP_PKG}.date=${BUILD_DATE}'" \
+              -X '${{env.APP_PACKAGE}}.version=${{steps.buildinfo.outputs.version}}' \
+              -X '${{env.APP_PACKAGE}}.commit=${{steps.buildinfo.outputs.commit}}' \
+              -X '${{env.APP_PACKAGE}}.date=${{steps.buildinfo.outputs.date}}'" \
             -o smurf .
 
       - name: Verify Version
@@ -85,8 +77,8 @@ jobs:
     name: Check Formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{env.GO_VERSION}}
       - run: go fmt ./...

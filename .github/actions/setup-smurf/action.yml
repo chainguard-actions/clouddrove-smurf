@@ -18,7 +18,7 @@ inputs:
 
 runs:
   using: "docker"
-  image: 'docker://ghcr.io/clouddrove/smurf@sha256:7660899466744f99eeffad4a144101474fdf4dbd58ddca09966aa5a0f6a547bc' # v0.0.5
+  image: 'docker://ghcr.io/clouddrove/smurf:v0.0.5'
   args:
     - ${{ inputs.tool }}
     - ${{ inputs.command }}

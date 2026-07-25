@@ -1,6 +1,7 @@
 name: Build
 
-permissions: {}
+permissions:
+  contents: read
 
 env:
   GO_VERSION: 1.26.0
@@ -16,9 +17,8 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    permissions: {}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -51,20 +51,16 @@ jobs:
           echo "Commit: $COMMIT"
           echo "Build Date: $DATE"
           
-          safe_version=$(printf '%s' "$VERSION" | tr -d '\n\r')
-          safe_commit=$(printf '%s' "$COMMIT" | tr -d '\n\r')
-          safe_date=$(printf '%s' "$DATE" | tr -d '\n\r')
-          
-          echo "version=${safe_version}" >> "$GITHUB_OUTPUT"
-          echo "commit=${safe_commit}" >> "$GITHUB_OUTPUT"
-          echo "date=${safe_date}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=${COMMIT}" >> $GITHUB_OUTPUT
+          echo "date=${DATE}" >> $GITHUB_OUTPUT
 
       - name: Build
         env:
-          APP_PKG: ${{env.APP_PACKAGE}}
-          BUILD_VERSION: ${{steps.buildinfo.outputs.version}}
-          BUILD_COMMIT: ${{steps.buildinfo.outputs.commit}}
-          BUILD_DATE: ${{steps.buildinfo.outputs.date}}
+          APP_PKG: ${{ env.APP_PACKAGE }}
+          BUILD_VERSION: ${{ steps.buildinfo.outputs.version }}
+          BUILD_COMMIT: ${{ steps.buildinfo.outputs.commit }}
+          BUILD_DATE: ${{ steps.buildinfo.outputs.date }}
         run: |
           echo "Building with version injection:"
           echo "Package: $APP_PKG"
@@ -88,9 +84,8 @@ jobs:
   format:
     name: Check Formatting
     runs-on: ubuntu-latest
-    permissions: {}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{env.GO_VERSION}}

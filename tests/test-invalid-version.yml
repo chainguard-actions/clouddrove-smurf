@@ -11,16 +11,16 @@ jobs:
         id: action
         uses: .
         with:
-          version: "not-a-version"
+          version: "1.2.3"
         continue-on-error: true
 
-      - name: Assert action failed for invalid version
+      - name: Assert action failed for invalid version format
         env:
           OUTCOME: ${{ steps.action.outcome }}
         run: |
-          echo "action outcome: $OUTCOME"
+          echo "outcome: $OUTCOME"
           if [ "$OUTCOME" != "failure" ]; then
-            echo "FAIL: expected action to fail with invalid version format, but outcome was '$OUTCOME'"
+            echo "FAIL: expected action to fail for invalid version '1.2.3' (missing 'v' prefix), but got outcome: $OUTCOME"
             exit 1
           fi
-          echo "PASS: action correctly failed for invalid version format"
+          echo "PASS: action correctly rejected invalid version format"

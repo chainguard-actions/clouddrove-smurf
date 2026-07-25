@@ -46,9 +46,8 @@ runs:
 
         safe_os=$(printf '%s' "$OS" | tr -d '\n\r')
         safe_arch=$(printf '%s' "$ARCH" | tr -d '\n\r')
-
-        echo "os=${safe_os}" >> "$GITHUB_OUTPUT"
-        echo "arch=${safe_arch}" >> "$GITHUB_OUTPUT"
+        echo "os=$safe_os" >> "$GITHUB_OUTPUT"
+        echo "arch=$safe_arch" >> "$GITHUB_OUTPUT"
     - name: Get correct version format
       shell: bash
       id: version
@@ -69,8 +68,8 @@ runs:
             exit 1
           fi
 
-          safe_version=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
-          echo "tag=${safe_version}" >> "$GITHUB_OUTPUT"
+          safe_tag=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
+          echo "tag=${safe_tag}" >> "$GITHUB_OUTPUT"
         fi
     - name: Download and Install Smurf
       shell: bash

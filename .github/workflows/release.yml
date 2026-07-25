@@ -2,9 +2,6 @@ name: Release
 on:
   push:
     tags: [ v* ]
-
-permissions: {}
-
 env:
   GO_VERSION: 1.26.0
   REPO: ${{ github.repository }}
@@ -14,7 +11,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     strategy:
       matrix:
         GOOS: [linux, darwin, windows]
@@ -23,7 +21,7 @@ jobs:
           - GOOS: windows
             ext: .exe
     steps:
-    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         fetch-depth: 0
 
@@ -46,22 +44,19 @@ jobs:
       run: |
         set -euo pipefail
         echo "Collecting build information..."
-        
-        VERSION="$INPUT_VERSION"
+
+        safe_version=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
+        VERSION="$safe_version"
         COMMIT=$(git rev-parse --short HEAD)
         DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-        
+
         echo "Version: $VERSION"
         echo "Commit: $COMMIT"
         echo "Build Date: $DATE"
-        
-        safe_version=$(printf '%s' "$VERSION" | tr -d '\n\r')
-        safe_commit=$(printf '%s' "$COMMIT" | tr -d '\n\r')
-        safe_date=$(printf '%s' "$DATE" | tr -d '\n\r')
-        
-        echo "version=${safe_version}" >> "$GITHUB_OUTPUT"
-        echo "commit=${safe_commit}" >> "$GITHUB_OUTPUT"
-        echo "date=${safe_date}" >> "$GITHUB_OUTPUT"
+
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "commit=${COMMIT}" >> $GITHUB_OUTPUT
+        echo "date=${DATE}" >> $GITHUB_OUTPUT
 
     - name: Build Binary with Version Injection
       env:
@@ -76,15 +71,15 @@ jobs:
         echo "Building $BINARY_NAME for $MATRIX_GOOS/$MATRIX_GOARCH"
         echo "Package: $APP_PKG"
         echo "Version: $BUILD_VERSION"
-        
+
         OUTPUT_NAME="$BINARY_NAME"
         if [ "$MATRIX_GOOS" = "windows" ]; then
           OUTPUT_NAME="$OUTPUT_NAME.exe"
         fi
-        
+
         # Create output directory
         mkdir -p "bin/$MATRIX_GOOS-$MATRIX_GOARCH"
-        
+
         # CORRECTED BUILD COMMAND - using current directory (.)
         GOOS="$MATRIX_GOOS" GOARCH="$MATRIX_GOARCH" go build -a \
           -ldflags "\
@@ -101,9 +96,9 @@ jobs:
         MATRIX_GOARCH: ${{ matrix.GOARCH }}
       run: |
         mkdir -p dist
-        
-        ARCHIVE_NAME="${BINARY_NAME}-${BUILD_VERSION}-${MATRIX_GOOS}-${MATRIX_GOARCH}"
-        
+
+        ARCHIVE_NAME="$BINARY_NAME-$BUILD_VERSION-$MATRIX_GOOS-$MATRIX_GOARCH"
+
         if [ "$MATRIX_GOOS" = "windows" ]; then
           # For Windows: create zip with .exe binary
           zip -j "dist/$ARCHIVE_NAME.zip" "bin/$MATRIX_GOOS-$MATRIX_GOARCH/$BINARY_NAME.exe"
@@ -113,7 +108,7 @@ jobs:
           tar -czf "dist/$ARCHIVE_NAME.tar.gz" -C "bin/$MATRIX_GOOS-$MATRIX_GOARCH" "$BINARY_NAME"
           echo "Created Unix archive: dist/$ARCHIVE_NAME.tar.gz"
         fi
-        
+
         echo "Distribution archives:"
         ls -la dist/
 
@@ -132,7 +127,7 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         fetch-depth: 0
 
@@ -177,7 +172,7 @@ jobs:
         cat checksums.txt
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
       with:
         files: |
           artifacts/*.tar.gz
@@ -202,17 +197,19 @@ jobs:
     runs-on: ubuntu-latest
     name: Build the docker image
     needs: build
-    permissions: {}
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download Linux Binary for Docker
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -247,21 +244,21 @@ jobs:
           cp "docker-bin/$BINARY_NAME" /usr/local/bin/ || true
           chmod +x "/usr/local/bin/$BINARY_NAME"
           
-          make image IMAGE="ghcr.io/${REPO}:${GH_REF_NAME}"
+          make image IMAGE="ghcr.io/$REPO:$GH_REF_NAME"
 
       - name: Tag latest
         env:
           REPO: ${{ env.REPO }}
           GH_REF_NAME: ${{ github.ref_name }}
-        run: docker tag "ghcr.io/${REPO}:${GH_REF_NAME}" "ghcr.io/${REPO}:latest"
+        run: docker tag "ghcr.io/$REPO:$GH_REF_NAME" "ghcr.io/$REPO:latest"
 
       - name: Push Docker Image
         env:
           REPO: ${{ env.REPO }}
           GH_REF_NAME: ${{ github.ref_name }}
-        run: docker push "ghcr.io/${REPO}:${GH_REF_NAME}"
+        run: docker push "ghcr.io/$REPO:$GH_REF_NAME"
 
       - name: Push Latest Tag
         env:
           REPO: ${{ env.REPO }}
-        run: docker push "ghcr.io/${REPO}:latest"
+        run: docker push "ghcr.io/$REPO:latest"

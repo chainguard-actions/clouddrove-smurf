@@ -1,0 +1,26 @@
+---
+version: 2
+updates:   
+  - package-ecosystem: "github-actions" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "daily"
+    # Add assignees
+    assignees:
+      - "clouddrove-ci"
+    # Add reviewer
+    reviewers: 
+      - "anmolnagpal"
+      - "anketclouddrove"
+      
+  - package-ecosystem: "gomod" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "daily"
+    # Add assignees
+    assignees:
+      - "clouddrove-ci"
+    # Add reviewer
+    reviewers:
+      - "anmolnagpal"
+      - "anketclouddrove"

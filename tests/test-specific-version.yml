@@ -1,0 +1,93 @@
+name: Test specific version install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up mock curl and fake smurf binary
+        run: |
+          # Create a fake smurf binary
+          mkdir -p /tmp/fake-smurf-bin
+          printf '#!/bin/sh\necho "smurf version v0.0.3 (fake)"\n' > /tmp/fake-smurf-bin/smurf
+          chmod +x /tmp/fake-smurf-bin/smurf
+
+          # Create a fake tar.gz containing the smurf binary
+          cd /tmp/fake-smurf-bin
+          tar -czf /tmp/fake-smurf.tar.gz smurf
+
+          # Create a fake curl that intercepts the download URL
+          # Handles both standalone -o FILE and combined flags like -fsSLo FILE
+          mkdir -p /tmp/fake-bin
+          printf '#!/bin/sh\n' > /tmp/fake-bin/curl
+          printf 'out=""\n' >> /tmp/fake-bin/curl
+          printf 'prev=""\n' >> /tmp/fake-bin/curl
+          printf 'for arg in "$@"; do\n' >> /tmp/fake-bin/curl
+          printf '  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then\n' >> /tmp/fake-bin/curl
+          printf '    out="$arg"\n' >> /tmp/fake-bin/curl
+          printf '  else\n' >> /tmp/fake-bin/curl
+          printf '    case "$prev" in\n' >> /tmp/fake-bin/curl
+          printf '      -*o) out="$arg" ;;\n' >> /tmp/fake-bin/curl
+          printf '    esac\n' >> /tmp/fake-bin/curl
+          printf '  fi\n' >> /tmp/fake-bin/curl
+          printf '  prev="$arg"\n' >> /tmp/fake-bin/curl
+          printf 'done\n' >> /tmp/fake-bin/curl
+          printf 'payload=""\n' >> /tmp/fake-bin/curl
+          printf 'case "$*" in\n' >> /tmp/fake-bin/curl
+          printf '  *clouddrove/smurf/releases/download*smurf*.tar.gz*)\n' >> /tmp/fake-bin/curl
+          printf '    payload="/tmp/fake-smurf.tar.gz"\n' >> /tmp/fake-bin/curl
+          printf '    ;;\n' >> /tmp/fake-bin/curl
+          printf 'esac\n' >> /tmp/fake-bin/curl
+          printf 'if [ -n "$payload" ]; then\n' >> /tmp/fake-bin/curl
+          printf '  if [ -n "$out" ]; then\n' >> /tmp/fake-bin/curl
+          printf '    cat "$payload" > "$out"\n' >> /tmp/fake-bin/curl
+          printf '  else\n' >> /tmp/fake-bin/curl
+          printf '    cat "$payload"\n' >> /tmp/fake-bin/curl
+          printf '  fi\n' >> /tmp/fake-bin/curl
+          printf '  exit 0\n' >> /tmp/fake-bin/curl
+          printf 'fi\n' >> /tmp/fake-bin/curl
+          printf 'exec /usr/bin/curl "$@"\n' >> /tmp/fake-bin/curl
+          chmod +x /tmp/fake-bin/curl
+
+          # Add fake-bin to PATH for all subsequent steps
+          echo "/tmp/fake-bin" >> "$GITHUB_PATH"
+
+      - name: Install smurf v0.0.3
+        id: action
+        uses: .
+        with:
+          version: v0.0.3
+
+      - name: Assert smurf is installed and on PATH
+        run: |
+          echo "Checking smurf binary..."
+          if ! command -v smurf > /dev/null 2>&1; then
+            echo "FAIL: smurf not found on PATH"
+            exit 1
+          fi
+          echo "PASS: smurf found at $(command -v smurf)"
+
+      - name: Assert smurf --version works
+        run: |
+          echo "Running smurf --version..."
+          VERSION_OUTPUT=$(smurf --version 2>&1)
+          echo "Output: $VERSION_OUTPUT"
+          if [ -z "$VERSION_OUTPUT" ]; then
+            echo "FAIL: smurf --version produced no output"
+            exit 1
+          fi
+          echo "PASS: smurf --version returned: $VERSION_OUTPUT"
+
+      - name: Assert version is v0.0.3
+        run: |
+          echo "Checking version string..."
+          VERSION_OUTPUT=$(smurf --version 2>&1)
+          echo "Output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -q "v0.0.3"; then
+            echo "PASS: version output contains v0.0.3"
+          else
+            echo "FAIL: version output does not contain v0.0.3: $VERSION_OUTPUT"
+            exit 1
+          fi

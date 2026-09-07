@@ -13,6 +13,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v1.1.7-beta | [`v1.1.7-beta`](https://github.com/chainguard-actions/clouddrove-smurf/tree/v1.1.7-beta) | [`81f1052`](https://github.com/clouddrove/smurf/commit/81f1052f0198de513c87734d4f9cc0b78b83f124) |
 | v1.1.8 | [`v1.1.8`](https://github.com/chainguard-actions/clouddrove-smurf/tree/v1.1.8) | [`81f1052`](https://github.com/clouddrove/smurf/commit/81f1052f0198de513c87734d4f9cc0b78b83f124) |
 | v1.1.9 | [`v1.1.9`](https://github.com/chainguard-actions/clouddrove-smurf/tree/v1.1.9) | [`6469f44`](https://github.com/clouddrove/smurf/commit/6469f44dfe33f8634fd3b51b3b995f448ac30f55) |
+| v1.2.0 | [`v1.2.0`](https://github.com/chainguard-actions/clouddrove-smurf/tree/v1.2.0) | [`dbf85b9`](https://github.com/clouddrove/smurf/commit/dbf85b9cb9501f7351ec5679830ea0be278552b3) |
 
 ## Privacy
 

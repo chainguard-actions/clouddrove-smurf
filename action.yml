@@ -1,0 +1,109 @@
+name: 'Setup Smurf'
+description: 'Install the Smurf CLI tool in GitHub Actions workflows'
+author: 'CloudDrove'
+branding:
+  icon: 'terminal'
+  color: 'blue'
+inputs:
+  version:
+    description: 'Version of smurf to install (e.g., v0.0.3, latest)'
+    required: false
+    default: 'latest'
+runs:
+  using: 'composite'
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Determine OS and Architecture
+      shell: bash
+      id: platform
+      run: |
+        OS=$(echo "$RUNNER_OS" | tr '[:upper:]' '[:lower:]')
+        ARCH="amd64"
+
+        if [ "$OS" = "macos" ]; then
+          OS="darwin"
+        fi
+
+        if [ "$(uname -m)" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then
+          ARCH="arm64"
+        fi
+
+        safe_os=$(printf '%s' "$OS" | tr -d '\n\r')
+        safe_arch=$(printf '%s' "$ARCH" | tr -d '\n\r')
+        echo "os=$safe_os" >> "$GITHUB_OUTPUT"
+        echo "arch=$safe_arch" >> "$GITHUB_OUTPUT"
+    - name: Get correct version format
+      shell: bash
+      id: version
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if [ "$INPUT_VERSION" = "latest" ]; then
+          # Resolved from the releases/latest redirect rather than the REST API.
+          # The API allows 60 unauthenticated requests per hour per IP, and
+          # hosted runners share egress addresses, so the previous
+          # `curl -s ... | grep tag_name` returned nothing once that budget was
+          # spent. Under `set -e -o pipefail` the grep failure exited 1 with no
+          # message, which is how this failed on macOS runners while passing on
+          # ubuntu. The redirect carries no such limit.
+          if ! LATEST_URL=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              https://github.com/clouddrove/smurf/releases/latest); then
+            echo "❌ Could not reach GitHub to resolve the latest smurf release."
+            echo "   Pass an explicit version (e.g. version: v1.1.9) to skip this lookup."
+            exit 1
+          fi
+
+          LATEST_TAG="${LATEST_URL##*/}"
+
+          # A redirect to the releases index rather than a tag means no release
+          # was resolved; without this the empty value flows into the download
+          # URL and fails later with a confusing 404.
+          if [[ ! "$LATEST_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Could not determine the latest smurf release (got: '$LATEST_TAG')."
+            echo "   Pass an explicit version (e.g. version: v1.1.9) to skip this lookup."
+            exit 1
+          fi
+
+          echo "Resolved latest release: $LATEST_TAG"
+          safe_tag=$(printf '%s' "$LATEST_TAG" | tr -d '\n\r')
+          echo "tag=${safe_tag}" >> "$GITHUB_OUTPUT"
+        else
+          # Validate version format (must start with v and contain only safe chars)
+          if [[ ! "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format. Expected format: vX.Y.Z"
+            exit 1
+          fi
+
+          safe_version=$(printf '%s' "$INPUT_VERSION" | tr -d '\n\r')
+          echo "tag=$safe_version" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Download and Install Smurf
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.tag }}
+        OS: ${{ steps.platform.outputs.os }}
+        ARCH: ${{ steps.platform.outputs.arch }}
+      run: "set -euo pipefail\necho \"\U0001F4E6 Installing smurf $VERSION for $OS/$ARCH...\"\n\n# CORRECT URL: Includes 'v' in both path and filename\nURL=\"https://github.com/clouddrove/smurf/releases/download/${VERSION}/smurf-${VERSION}-${OS}-${ARCH}.tar.gz\"\n\necho \"Downloading from: $URL\"\n\n# Download and extract. --proto '=https' rejects a non-HTTPS URL and\n# --proto-redir '=https' keeps every redirect hop on HTTPS, so the\n# release tarball cannot be fetched over plain HTTP via a redirect.\nif ! curl -fsSLo smurf.tar.gz --proto '=https' --proto-redir '=https' --tlsv1.2 \"$URL\"; then\n  echo \"❌ Failed to download smurf from $URL\"\n  exit 1\nfi\n\n# Verify against checksums.txt from the same release. The version is\n# chosen at runtime, so a checksum cannot be pinned in this file.\n# This catches a truncated or corrupted download and a tarball swapped\n# on its own; it does NOT defend against someone who can rewrite the\n# whole release, since they could rewrite checksums.txt with it.\nTARBALL=\"smurf-${VERSION}-${OS}-${ARCH}.tar.gz\"\nSUMS_URL=\"https://github.com/clouddrove/smurf/releases/download/${VERSION}/checksums.txt\"\nif ! curl -fsSLo checksums.txt --proto '=https' --proto-redir '=https' --tlsv1.2 \"$SUMS_URL\"; then\n  echo \"❌ Failed to download checksums from $SUMS_URL\"\n  exit 1\nfi\nEXPECTED=\"$(awk -v f=\"$TARBALL\" '$2 == f { print $1 }' checksums.txt)\"\nif [ -z \"$EXPECTED\" ]; then\n  echo \"❌ No checksum for $TARBALL in checksums.txt\"\n  exit 1\nfi\n# This action supports macOS runners, which ship shasum rather than\n# the GNU sha256sum available on the Linux images.\nif command -v sha256sum >/dev/null 2>&1; then\n  ACTUAL=\"$(sha256sum smurf.tar.gz | cut -d' ' -f1)\"\nelse\n  ACTUAL=\"$(shasum -a 256 smurf.tar.gz | cut -d' ' -f1)\"\nfi\nif [ \"$EXPECTED\" != \"$ACTUAL\" ]; then\n  echo \"❌ Checksum mismatch for $TARBALL\"\n  echo \"   expected: $EXPECTED\"\n  echo \"   actual:   $ACTUAL\"\n  exit 1\nfi\necho \"✅ Checksum verified for $TARBALL\"\nrm -f checksums.txt\n\ntar -xzf smurf.tar.gz\nchmod +x smurf\nsudo mv smurf /usr/local/bin/\nrm smurf.tar.gz\n\necho \"✅ smurf installed successfully!\"\n"
+    - name: Verify Installation
+      shell: bash
+      run: |
+        smurf --version

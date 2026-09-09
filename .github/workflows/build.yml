@@ -1,0 +1,97 @@
+name: Build
+
+env:
+  GO_VERSION: 1.27.1
+  APP_PACKAGE: github.com/clouddrove/smurf/cmd 
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+# Build and test only read the repo. Without this the jobs would inherit the
+# repository default token, which is write-scoped.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{env.GO_VERSION}}
+
+      - name: Go Mod Tidy
+        run: go mod tidy
+
+      - name: Vet
+        run: make vet
+
+      - name: Test
+        run: make test
+
+      - name: Get Build Info
+        id: buildinfo
+        run: |
+          set -euo pipefail
+          echo "Collecting build information..."
+          
+          # Get version from GitHub releases or git tags
+          VERSION=$(curl -sf https://api.github.com/repos/clouddrove/smurf/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || git describe --tags --abbrev=0)
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          
+          echo "Version: $VERSION"
+          echo "Commit: $COMMIT"
+          echo "Build Date: $DATE"
+          
+          safe_version=$(printf '%s' "$VERSION" | tr -d '\n\r')
+          safe_commit=$(printf '%s' "$COMMIT" | tr -d '\n\r')
+          safe_date=$(printf '%s' "$DATE" | tr -d '\n\r')
+          echo "version=${safe_version}" >> "$GITHUB_OUTPUT"
+          echo "commit=${safe_commit}" >> "$GITHUB_OUTPUT"
+          echo "date=${safe_date}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          BUILD_APP_PACKAGE: ${{env.APP_PACKAGE}}
+          BUILD_VERSION: ${{steps.buildinfo.outputs.version}}
+          BUILD_COMMIT: ${{steps.buildinfo.outputs.commit}}
+          BUILD_DATE: ${{steps.buildinfo.outputs.date}}
+        run: |
+          echo "Building with version injection:"
+          echo "Package: $BUILD_APP_PACKAGE"
+          echo "Version: $BUILD_VERSION"
+          echo "Commit: $BUILD_COMMIT"
+          echo "Date: $BUILD_DATE"
+          
+          go build -a \
+            -ldflags "\
+              -X '${BUILD_APP_PACKAGE}.version=${BUILD_VERSION}' \
+              -X '${BUILD_APP_PACKAGE}.commit=${BUILD_COMMIT}' \
+              -X '${BUILD_APP_PACKAGE}.date=${BUILD_DATE}'" \
+            -o smurf .
+
+      - name: Verify Version
+        run: |
+          echo "Binary version report:"
+          ./smurf --version
+          ./smurf version
+
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{env.GO_VERSION}}
+      - run: go fmt ./...

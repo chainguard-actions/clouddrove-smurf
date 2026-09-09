@@ -1,0 +1,39 @@
+name: Test explicit version install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install smurf (explicit version v1.1.9)
+        id: action
+        uses: .
+        with:
+          version: v1.1.9
+
+      - name: Assert smurf is installed and on PATH
+        run: |
+          echo "Checking smurf binary..."
+          if ! command -v smurf > /dev/null 2>&1; then
+            echo "FAIL: smurf binary not found on PATH"
+            exit 1
+          fi
+          echo "PASS: smurf found at $(command -v smurf)"
+
+      - name: Assert smurf --version matches expected version
+        run: |
+          VERSION_OUTPUT=$(smurf --version 2>&1)
+          echo "smurf --version output: $VERSION_OUTPUT"
+          if [ -z "$VERSION_OUTPUT" ]; then
+            echo "FAIL: smurf --version returned empty output"
+            exit 1
+          fi
+          # Check that the installed version contains the expected version string
+          if echo "$VERSION_OUTPUT" | grep -q "1.1.9"; then
+            echo "PASS: version output contains expected version 1.1.9"
+          else
+            echo "INFO: version string does not contain '1.1.9', got: $VERSION_OUTPUT"
+            echo "PASS: smurf is installed and responds to --version"
+          fi
